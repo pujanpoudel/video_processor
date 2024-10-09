@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:video_splitter/merge_video_screen.dart';
+import 'package:video_splitter/screens/merge_video_screen.dart';
 import 'package:video_splitter/screens/split_video_screen.dart';
 
 class HomeScreen extends StatelessWidget {
