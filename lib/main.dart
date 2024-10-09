@@ -11,6 +11,7 @@ class VideoSplitter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Video Processor',
       theme: ThemeData(
         colorSchemeSeed: Colors.blue,
