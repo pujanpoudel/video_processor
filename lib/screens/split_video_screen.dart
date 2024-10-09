@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:video_splitter/services/video_processor.dart';
+import 'package:video_splitter/widgets/loading_overlay.dart';
+import '../widgets/social_share_buttons.dart';
 
 class SplitVideoScreen extends StatefulWidget {
-  const SplitVideoScreen({Key? key}) : super(key: key);
+  const SplitVideoScreen({super.key});
 
   @override
-  _SplitVideoScreenState createState() => _SplitVideoScreenState();
+  SplitVideoScreenState createState() => SplitVideoScreenState();
 }
 
-class _SplitVideoScreenState extends State<SplitVideoScreen> {
+class SplitVideoScreenState extends State<SplitVideoScreen> {
   final _formKey = GlobalKey<FormState>();
   final _urlController = TextEditingController();
   int _parts = 2;

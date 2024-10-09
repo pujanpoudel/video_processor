@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:video_splitter/home_screen.dart';
+import 'package:video_splitter/screens/home_screen.dart';
 
 void main() {
   runApp(const VideoSplitter());
@@ -13,11 +13,14 @@ class VideoSplitter extends StatelessWidget {
     return MaterialApp(
       title: 'Video Processor',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        colorSchemeSeed: Colors.blue,
         brightness: Brightness.light,
+        useMaterial3: true,
       ),
       darkTheme: ThemeData(
+        colorSchemeSeed: Colors.blue,
         brightness: Brightness.dark,
+        useMaterial3: true,
       ),
       home: const HomeScreen(),
     );
