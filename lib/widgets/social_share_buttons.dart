@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:share_plus/share_plus.dart';
 
 class SocialShareButtons extends StatelessWidget {
   final String videoPath;
+  final VoidCallback onUploadToYouTube;
+  final VoidCallback onUploadToFacebook;
+  final VoidCallback onUploadToInstagram;
+  final VoidCallback onUploadToTikTok;
 
   const SocialShareButtons({
     super.key,
     required this.videoPath,
+    required this.onUploadToYouTube,
+    required this.onUploadToFacebook,
+    required this.onUploadToInstagram,
+    required this.onUploadToTikTok,
   });
 
   @override
@@ -19,25 +26,25 @@ class SocialShareButtons extends StatelessWidget {
           'Instagram',
           Icons.camera_alt,
           Colors.pink,
-          () => _shareToSocialMedia('instagram'),
+          onUploadToInstagram,
         ),
         _buildShareButton(
           'TikTok',
           Icons.music_note,
           Colors.black,
-          () => _shareToSocialMedia('tiktok'),
+          onUploadToTikTok,
         ),
         _buildShareButton(
           'Facebook',
           Icons.facebook,
           Colors.blue,
-          () => _shareToSocialMedia('facebook'),
+          onUploadToFacebook,
         ),
         _buildShareButton(
           'YouTube',
           Icons.play_arrow,
           Colors.red,
-          () => _shareToSocialMedia('youtube'),
+          onUploadToYouTube,
         ),
       ],
     );
@@ -58,19 +65,5 @@ class SocialShareButtons extends StatelessWidget {
         foregroundColor: Colors.white,
       ),
     );
-  }
-
-  Future<void> _shareToSocialMedia(String platform) async {
-    final file = XFile(videoPath);
-
-    try {
-      await Share.shareXFiles(
-        [file],
-        text: 'Check out this video!',
-      );
-    } catch (e) {
-      debugPrint('Error sharing video: $e');
-      //show error to user this
-    }
   }
 }
