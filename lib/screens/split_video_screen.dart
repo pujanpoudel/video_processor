@@ -87,6 +87,7 @@ class SplitVideoScreenState extends State<SplitVideoScreen> {
 
   Future<void> _processSplitVideo() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!mounted) return;
 
     setState(() {
       _isLoading = true;
@@ -98,17 +99,23 @@ class SplitVideoScreenState extends State<SplitVideoScreen> {
         _parts,
       );
 
-      setState(() {
-        _outputPath = outputPath;
-      });
+      if (mounted) {
+        setState(() {
+          _outputPath = outputPath;
+        });
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${e.toString()}')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: ${e.toString()}')),
+        );
+      }
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 }

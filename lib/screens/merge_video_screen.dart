@@ -1,7 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 import 'package:video_splitter/services/video_processor.dart';
 import 'package:video_splitter/widgets/social_share_buttons.dart';
-
 import '../widgets/loading_overlay.dart';
 
 class MergeVideoScreen extends StatefulWidget {
@@ -18,6 +19,15 @@ class MergeVideoScreenState extends State<MergeVideoScreen> {
   bool _isHorizontal = true;
   bool _isLoading = false;
   String? _outputPath;
+  VideoPlayerController? _videoPlayerController;
+
+  @override
+  void dispose() {
+    _url1Controller.dispose();
+    _url2Controller.dispose();
+    _videoPlayerController?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -97,6 +107,33 @@ class MergeVideoScreenState extends State<MergeVideoScreen> {
                     const Text('Share on:'),
                     const SizedBox(height: 8),
                     SocialShareButtons(videoPath: _outputPath!),
+                    const SizedBox(height: 24),
+                    const Text('Merged Video:'),
+                    const SizedBox(height: 8),
+                    _videoPlayerController != null &&
+                            _videoPlayerController!.value.isInitialized
+                        ? AspectRatio(
+                            aspectRatio:
+                                _videoPlayerController!.value.aspectRatio,
+                            child: VideoPlayer(_videoPlayerController!),
+                          )
+                        : const Text('Loading video...'),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: () {
+                        if (_videoPlayerController != null) {
+                          setState(() {
+                            _videoPlayerController!.value.isPlaying
+                                ? _videoPlayerController!.pause()
+                                : _videoPlayerController!.play();
+                          });
+                        }
+                      },
+                      child: Text(_videoPlayerController != null &&
+                              _videoPlayerController!.value.isPlaying
+                          ? 'Pause'
+                          : 'Play'),
+                    ),
                   ],
                 ],
               ),
@@ -110,8 +147,6 @@ class MergeVideoScreenState extends State<MergeVideoScreen> {
   Future<void> _processMergeVideos() async {
     if (!_formKey.currentState!.validate()) return;
     if (!mounted) return;
-
-    final localContext = context;
 
     setState(() {
       _isLoading = true;
@@ -133,10 +168,11 @@ class MergeVideoScreenState extends State<MergeVideoScreen> {
         setState(() {
           _outputPath = outputPath;
         });
+        _initializeVideoPlayer(outputPath);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(localContext).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: ${e.toString()}')),
         );
       }
@@ -147,5 +183,12 @@ class MergeVideoScreenState extends State<MergeVideoScreen> {
         });
       }
     }
+  }
+
+  Future<void> _initializeVideoPlayer(String videoPath) async {
+    _videoPlayerController = VideoPlayerController.file(File(videoPath))
+      ..initialize().then((_) {
+        setState(() {});
+      });
   }
 }
