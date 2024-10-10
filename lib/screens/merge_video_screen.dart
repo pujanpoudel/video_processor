@@ -1,358 +1,220 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:video_splitter/services/video_processor.dart';
-import 'package:video_splitter/widgets/loading_overlay.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:video_splitter/services/video_downloader.dart';
+import 'package:video_splitter/widgets/loading_overlay.dart';
 import 'package:video_splitter/widgets/social_share_buttons.dart';
 
 class MergeVideoScreen extends StatefulWidget {
   const MergeVideoScreen({super.key});
 
   @override
-  MergeVideoScreenState createState() => MergeVideoScreenState();
+  State<MergeVideoScreen> createState() => _MergeVideoScreenState();
 }
 
-class MergeVideoScreenState extends State<MergeVideoScreen> {
-  final _videoProcessor = VideoProcessor();
+class _MergeVideoScreenState extends State<MergeVideoScreen> {
+  final _socialDownloader = SocialVideoDownloader();
   final _url1Controller = TextEditingController();
   final _url2Controller = TextEditingController();
+
+  VideoPlayerController? _previewController1;
+  VideoPlayerController? _previewController2;
+  VideoPlayerController? _outputController;
+
   bool _isHorizontal = true;
   bool _isLoading = false;
   bool _isUrlInput1 = false;
   bool _isUrlInput2 = false;
+  bool _showDownloads = false;
+
   String? _outputPath;
-  VideoPlayerController? _videoPlayerController;
+  String? _errorMessage;
+
   double _mergeProgress = 0.0;
+  List<String> _downloadedVideos = [];
+  final Map<String, double> _downloadProgress = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDownloadedVideos();
+  }
 
   @override
   void dispose() {
     _url1Controller.dispose();
     _url2Controller.dispose();
-    _videoPlayerController?.dispose();
+    _previewController1?.dispose();
+    _previewController2?.dispose();
+    _outputController?.dispose();
     super.dispose();
   }
 
-  Widget _buildVideoSourceToggle(
-    String label,
-    bool isUrlInput,
-    Function(bool) onChanged,
-  ) {
+  Future<void> _loadDownloadedVideos() async {
+    try {
+      final directory = Directory('/storage/emulated/0/Download');
+      if (await directory.exists()) {
+        final files = await directory
+            .list()
+            .where((entity) => entity.path.toLowerCase().endsWith('.mp4'))
+            .map((e) => e.path)
+            .toList();
+        setState(() => _downloadedVideos = files);
+      }
+    } catch (e) {
+      debugPrint('Error loading downloaded videos: $e');
+    }
+  }
+
+  Widget _buildVideoSection(bool isFirstVideo) {
+    final controller = isFirstVideo ? _previewController1 : _previewController2;
+    final urlController = isFirstVideo ? _url1Controller : _url2Controller;
+    final isUrlInput = isFirstVideo ? _isUrlInput1 : _isUrlInput2;
+
+    return Card(
+      color: isFirstVideo ? Colors.blue.shade50 : Colors.blue.shade100,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildSourceToggle(isFirstVideo),
+            const SizedBox(height: 16),
+            if (controller?.value.isInitialized ?? false)
+              _buildVideoPreview(controller!, urlController.text, isFirstVideo)
+            else
+              _buildVideoInput(isUrlInput, urlController, isFirstVideo),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSourceToggle(bool isFirstVideo) {
     return Row(
       children: [
-        Text(label),
+        Text('${isFirstVideo ? "First" : "Second"} Video Source:'),
+        const Spacer(),
         Switch(
-          value: isUrlInput,
-          onChanged: onChanged,
+          value: isFirstVideo ? _isUrlInput1 : _isUrlInput2,
+          onChanged: (value) => setState(() {
+            if (isFirstVideo) {
+              _isUrlInput1 = value;
+            } else {
+              _isUrlInput2 = value;
+            }
+          }),
         ),
-        Text(isUrlInput ? 'URL' : 'Local'),
+        Text(isFirstVideo
+            ? (_isUrlInput1 ? 'URL' : 'File')
+            : (_isUrlInput2 ? 'URL' : 'File')),
       ],
     );
   }
 
-  Widget _buildVideoInput(
-    bool isUrlInput,
-    TextEditingController controller,
-    String label,
-    VoidCallback onPickVideo,
-  ) {
-    return isUrlInput
-        ? TextFormField(
-            controller: controller,
-            decoration: InputDecoration(
-              labelText: '$label URL',
-              hintText: 'Enter $label URL',
-              border: const OutlineInputBorder(),
-            ),
-          )
-        : Column(
-            children: [
-              Text('Selected file: ${controller.text.split('/').last}'),
-              const SizedBox(height: 8),
-              ElevatedButton.icon(
-                onPressed: onPickVideo,
-                icon: const Icon(Icons.file_upload),
-                label: Text('Select $label from Device'),
-              ),
-            ],
-          );
-  }
-
-  Widget _buildMergeControls() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+  Widget _buildVideoPreview(
+      VideoPlayerController controller, String path, bool isFirstVideo) {
+    return Column(
+      children: [
+        Stack(
+          alignment: Alignment.center,
           children: [
-            const Text(
-              'Merge Options',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text('Direction:'),
-                const SizedBox(width: 16),
-                ToggleButtons(
-                  isSelected: [_isHorizontal, !_isHorizontal],
-                  onPressed: (index) {
-                    setState(() {
-                      _isHorizontal = index == 0;
-                    });
-                  },
-                  children: const [
-                    Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12),
-                      child: Row(
-                        children: [
-                          Icon(Icons.horizontal_distribute),
-                          SizedBox(width: 8),
-                          Text('Horizontal'),
-                        ],
-                      ),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12),
-                      child: Row(
-                        children: [
-                          Icon(Icons.vertical_distribute),
-                          SizedBox(width: 8),
-                          Text('Vertical'),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            if (_mergeProgress > 0 && _mergeProgress < 1)
-              Column(
-                children: [
-                  LinearProgressIndicator(value: _mergeProgress),
-                  const SizedBox(height: 8),
-                  Text(
-                      'Progress: ${(_mergeProgress * 100).toStringAsFixed(1)}%'),
-                  const SizedBox(height: 16),
-                ],
-              ),
-            ElevatedButton.icon(
-              onPressed: _isLoading ? null : _processMergeVideos,
-              icon: const Icon(Icons.merge_type),
-              label: const Text('Merge Videos'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVideoPreview() {
-    if (_outputPath == null) return const SizedBox.shrink();
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Preview',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
             AspectRatio(
-              aspectRatio: _videoPlayerController?.value.aspectRatio ?? 16 / 9,
-              child: _videoPlayerController != null
-                  ? VideoPlayer(_videoPlayerController!)
-                  : const Center(child: CircularProgressIndicator()),
+              aspectRatio: controller.value.aspectRatio,
+              child: VideoPlayer(controller),
             ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                IconButton(
-                  onPressed: () {
-                    if (_videoPlayerController != null) {
-                      setState(() {
-                        _videoPlayerController!.value.isPlaying
-                            ? _videoPlayerController!.pause()
-                            : _videoPlayerController!.play();
-                      });
-                    }
-                  },
-                  icon: Icon(
-                    _videoPlayerController?.value.isPlaying ?? false
-                        ? Icons.pause
-                        : Icons.play_arrow,
-                  ),
-                ),
-                IconButton(
-                  onPressed: _downloadMergedVideo,
-                  icon: const Icon(Icons.download),
-                ),
-                IconButton(
-                  onPressed: () => _showSocialUploadOptions(_outputPath!),
-                  icon: const Icon(Icons.share),
-                ),
-              ],
+            IconButton(
+              icon: Icon(
+                controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                color: Colors.white,
+                size: 48,
+              ),
+              onPressed: () {
+                setState(() {
+                  controller.value.isPlaying
+                      ? controller.pause()
+                      : controller.play();
+                });
+              },
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white),
+                onPressed: () => _clearVideo(isFirstVideo),
+              ),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Merge Videos'),
-      ),
-      body: LoadingOverlay(
-        isLoading: _isLoading,
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _buildVideoSourceToggle(
-                          'First Video Source:',
-                          _isUrlInput1,
-                          (value) => setState(() => _isUrlInput1 = value),
-                        ),
-                        const SizedBox(height: 16),
-                        _buildVideoInput(
-                          _isUrlInput1,
-                          _url1Controller,
-                          'First Video',
-                          _pickFirstVideo,
-                        ),
-                        const SizedBox(height: 24),
-                        _buildVideoSourceToggle(
-                          'Second Video Source:',
-                          _isUrlInput2,
-                          (value) => setState(() => _isUrlInput2 = value),
-                        ),
-                        const SizedBox(height: 16),
-                        _buildVideoInput(
-                          _isUrlInput2,
-                          _url2Controller,
-                          'Second Video',
-                          _pickSecondVideo,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                _buildMergeControls(),
-                const SizedBox(height: 16),
-                _buildVideoPreview(),
-              ],
-            ),
-          ),
+        const SizedBox(height: 8),
+        Text(
+          path.split('/').last,
+          style: const TextStyle(fontSize: 12),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
-      ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            ElevatedButton.icon(
+              onPressed: () => _downloadMergedVideo(),
+              icon: const Icon(Icons.download),
+              label: const Text('Save Video'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => _showSocialUploadOptions(path),
+              icon: const Icon(Icons.share),
+              label: const Text('Share'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
-  Future<void> _pickFirstVideo() async {
-    FilePickerResult? result =
-        await FilePicker.platform.pickFiles(type: FileType.video);
-    if (result != null) {
-      setState(() {
-        _url1Controller.text = result.files.single.path!;
-      });
-    }
-  }
-
-  Future<void> _pickSecondVideo() async {
-    FilePickerResult? result =
-        await FilePicker.platform.pickFiles(type: FileType.video);
-    if (result != null) {
-      setState(() {
-        _url2Controller.text = result.files.single.path!;
-      });
-    }
-  }
-
-  Future<void> _processMergeVideos() async {
-    if (_url1Controller.text.isEmpty || _url2Controller.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select both videos')),
-      );
-      return;
-    }
-
+  void _clearVideo(bool isFirstVideo) {
     setState(() {
-      _isLoading = true;
-      _mergeProgress = 0.0;
+      if (isFirstVideo) {
+        _previewController1?.dispose();
+        _previewController1 = null;
+        _url1Controller.clear();
+      } else {
+        _previewController2?.dispose();
+        _previewController2 = null;
+        _url2Controller.clear();
+      }
     });
-
-    try {
-      final outputPath = await _videoProcessor.mergeVideos(
-        [_url1Controller.text, _url2Controller.text],
-        _isHorizontal,
-        (progress) {
-          if (mounted) {
-            setState(() {
-              _mergeProgress = progress;
-            });
-          }
-        },
-      );
-
-      if (mounted) {
-        setState(() {
-          _outputPath = outputPath;
-        });
-        await _initializeVideoPlayer(outputPath);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: ${e.toString()}')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
   }
 
-  Future<void> _initializeVideoPlayer(String videoPath) async {
-    _videoPlayerController?.dispose();
-    _videoPlayerController = VideoPlayerController.file(File(videoPath));
-
-    try {
-      await _videoPlayerController!.initialize();
-      if (mounted) {
-        setState(() {});
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error initializing video player: $e')),
-        );
-      }
+  Widget _buildVideoInput(
+      bool isUrlInput, TextEditingController controller, bool isFirstVideo) {
+    if (isUrlInput) {
+      return TextField(
+        controller: controller,
+        decoration: InputDecoration(
+          labelText: 'Enter video URL',
+          hintText: 'YouTube, TikTok, Instagram, or Facebook URL',
+          border: const OutlineInputBorder(),
+          errorText: _errorMessage,
+        ),
+        onChanged: (value) => _handleUrlInput(value, isFirstVideo),
+      );
     }
+
+    return ElevatedButton.icon(
+      style: ElevatedButton.styleFrom(
+        backgroundColor:
+            isFirstVideo ? Colors.blue.shade700 : Colors.blue.shade500,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      ),
+      onPressed: () => _pickVideo(isFirstVideo),
+      icon: const Icon(Icons.file_upload),
+      label: Text('Select ${isFirstVideo ? "First" : "Second"} Video'),
+    );
   }
 
   Future<void> _downloadMergedVideo() async {
@@ -361,9 +223,21 @@ class MergeVideoScreenState extends State<MergeVideoScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final directory = await getExternalStorageDirectory();
-      if (directory == null)
-        throw Exception('Could not access storage directory');
+      var status = await Permission.storage.status;
+      if (!status.isGranted) {
+        await Permission.storage.request();
+      }
+
+      if (Platform.isAndroid &&
+          await Permission.manageExternalStorage.isGranted == false) {
+        await Permission.manageExternalStorage.request();
+      }
+
+      final directory = Directory('/storage/emulated/0/Download');
+
+      if (!directory.existsSync()) {
+        throw Exception('Could not access Downloads directory');
+      }
 
       final fileName =
           'merged_video_${DateTime.now().millisecondsSinceEpoch}.mp4';
@@ -373,9 +247,17 @@ class MergeVideoScreenState extends State<MergeVideoScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Video saved to: $savePath')),
+          SnackBar(content: Text('Video saved to Downloads: $savePath')),
         );
       }
+      final result = await Process.run('am', [
+        'broadcast',
+        '-a',
+        'android.intent.action.MEDIA_SCANNER_SCAN_FILE',
+        '-d',
+        'file://$savePath'
+      ]);
+      print(result.stdout);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -386,6 +268,283 @@ class MergeVideoScreenState extends State<MergeVideoScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  Future<void> _handleUrlInput(String url, bool isFirstVideo) async {
+    if (url.isEmpty || !_socialDownloader.isSocialMediaUrl(url)) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+      _downloadProgress[isFirstVideo ? 'first' : 'second'] = 0;
+    });
+
+    try {
+      const savePath = 'simulated_download_path.mp4';
+      _outputPath = savePath;
+      await _initializePreview(savePath, isFirstVideo);
+
+      await _downloadMergedVideo();
+    } catch (e) {
+      _showError(e.toString());
+    } finally {
+      setState(() {
+        _isLoading = false;
+        _downloadProgress.remove(isFirstVideo ? 'first' : 'second');
+      });
+    }
+  }
+
+  Future<void> _pickVideo(bool isFirstVideo) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(type: FileType.video);
+      if (result != null) {
+        final path = result.files.single.path!;
+        if (isFirstVideo) {
+          _url1Controller.text = path;
+        } else {
+          _url2Controller.text = path;
+        }
+        await _initializePreview(path, isFirstVideo);
+      }
+    } catch (e) {
+      _showError('Error picking video: $e');
+    }
+  }
+
+  Future<void> _initializePreview(String path, bool isFirstVideo) async {
+    try {
+      final controller = VideoPlayerController.file(File(path));
+      await controller.initialize();
+      setState(() {
+        if (isFirstVideo) {
+          _previewController1?.dispose();
+          _previewController1 = controller;
+        } else {
+          _previewController2?.dispose();
+          _previewController2 = controller;
+        }
+      });
+    } catch (e) {
+      _showError('Error initializing preview: $e');
+    }
+  }
+
+  Widget _buildMergeControls() {
+    return Card(
+      color: Colors.blue.shade200,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Text('Merge Direction:'),
+                const Spacer(),
+                ToggleButtons(
+                  isSelected: [_isHorizontal, !_isHorizontal],
+                  onPressed: (index) {
+                    setState(() => _isHorizontal = index == 0);
+                  },
+                  children: const [
+                    Icon(Icons.horizontal_distribute),
+                    Icon(Icons.vertical_distribute),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (_mergeProgress > 0 && _mergeProgress < 1)
+              LinearProgressIndicator(value: _mergeProgress),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue.shade700,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              onPressed: _processMergeVideos,
+              child: const Text('Merge Videos'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _processMergeVideos() async {
+    if (_url1Controller.text.isEmpty || _url2Controller.text.isEmpty) {
+      _showError('Please select both videos');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _mergeProgress = 0.0;
+      _errorMessage = null;
+    });
+
+    try {
+      _outputPath = _outputPath;
+      await _initializeOutputPreview(_outputPath!);
+      await _downloadMergedVideo();
+    } catch (e) {
+      _showError('Error merging videos: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _initializeOutputPreview(String path) async {
+    if (_outputController != null) {
+      await _outputController!.dispose();
+    }
+
+    try {
+      final controller = VideoPlayerController.file(File(path));
+      await controller.initialize();
+      if (mounted) {
+        setState(() => _outputController = controller);
+      }
+    } catch (e) {
+      _showError('Error initializing output preview: $e');
+    }
+  }
+
+  void _showError(String message) {
+    setState(() => _errorMessage = message);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Merge Videos'),
+        actions: [
+          IconButton(
+            icon: Icon(_showDownloads ? Icons.folder_open : Icons.folder),
+            onPressed: () {
+              setState(() => _showDownloads = !_showDownloads);
+            },
+          ),
+        ],
+      ),
+      body: LoadingOverlay(
+        isLoading: _isLoading,
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              if (_showDownloads) _buildDownloadsPanel(),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildVideoSection(true),
+                    const SizedBox(height: 16),
+                    _buildVideoSection(false),
+                    const SizedBox(height: 24),
+                    _buildMergeControls(),
+                    if (_outputController != null) _buildMergedVideoOutput(),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDownloadsPanel() {
+    return Card(
+      margin: const EdgeInsets.all(8),
+      child: ListView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: _downloadedVideos.length,
+        itemBuilder: (context, index) {
+          final fileName = _downloadedVideos[index].split('/').last;
+          return ListTile(
+            leading: const Icon(Icons.video_file),
+            title: Text(
+              fileName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.play_arrow),
+                  onPressed: () =>
+                      _playDownloadedVideo(_downloadedVideos[index]),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete),
+                  onPressed: () => _deleteDownloadedVideo(index),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildMergedVideoOutput() {
+    if (_outputController == null || !_outputController!.value.isInitialized) {
+      return const SizedBox();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 24),
+        _buildVideoPreview(_outputController!, _outputPath!, false),
+        const SizedBox(height: 16),
+        ElevatedButton(
+          onPressed: () {
+            _outputController!.value.isPlaying
+                ? _outputController!.pause()
+                : _outputController!.play();
+          },
+          child: Text(
+            _outputController!.value.isPlaying ? 'Pause' : 'Play',
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _playDownloadedVideo(String path) async {
+    try {
+      final controller = VideoPlayerController.file(File(path));
+      await controller.initialize();
+      setState(() {
+        if (_outputController != null) {
+          _outputController!.dispose();
+        }
+        _outputController = controller;
+        _outputController!.play();
+      });
+    } catch (e) {
+      _showError('Error playing downloaded video: $e');
+    }
+  }
+
+  Future<void> _deleteDownloadedVideo(int index) async {
+    try {
+      final file = File(_downloadedVideos[index]);
+      await file.delete();
+      setState(() {
+        _downloadedVideos.removeAt(index);
+      });
+    } catch (e) {
+      _showError('Error deleting video: $e');
     }
   }
 

@@ -20,7 +20,6 @@ android {
 
     defaultConfig {
         applicationId = "com.example.video_splitter"
-        
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

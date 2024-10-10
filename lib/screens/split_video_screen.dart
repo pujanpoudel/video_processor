@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:video_splitter/services/video_processor.dart';
 import 'package:video_splitter/widgets/loading_overlay.dart';
 import 'package:video_splitter/widgets/social_share_buttons.dart';
@@ -17,9 +16,9 @@ class SplitVideoScreen extends StatefulWidget {
 class SplitVideoScreenState extends State<SplitVideoScreen> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _urlController = TextEditingController();
+  final TextEditingController _durationController = TextEditingController();
   final VideoProcessor _videoProcessor = VideoProcessor();
   bool _isLoading = false;
-  int _parts = 2;
   List<String>? _splitFiles;
   VideoPlayerController? _videoPlayerController;
   String _selectedSource = 'device';
@@ -29,6 +28,7 @@ class SplitVideoScreenState extends State<SplitVideoScreen> {
   @override
   void dispose() {
     _urlController.dispose();
+    _durationController.dispose();
     _videoPlayerController?.dispose();
     super.dispose();
   }
@@ -119,28 +119,19 @@ class SplitVideoScreenState extends State<SplitVideoScreen> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                const Icon(Icons.splitscreen),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Number of parts: $_parts',
-                    style: const TextStyle(fontSize: 16),
-                  ),
-                ),
-              ],
-            ),
-            Slider(
-              value: _parts.toDouble(),
-              min: 2,
-              max: 10,
-              divisions: 8,
-              label: _parts.toString(),
-              onChanged: (value) {
-                setState(() {
-                  _parts = value.round();
-                });
+            TextFormField(
+              controller: _durationController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Duration (minutes)',
+                hintText: 'Enter duration of each split in minutes',
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Please enter a valid duration';
+                }
+                return null;
               },
             ),
             const SizedBox(height: 16),
@@ -302,111 +293,78 @@ class SplitVideoScreenState extends State<SplitVideoScreen> {
       );
       return;
     }
-    if (!_formKey.currentState!.validate() && _selectedSource == 'url') return;
+
+    if (!_formKey.currentState!.validate()) return;
+
     setState(() {
       _isLoading = true;
       _splitProgress = 0.0;
     });
+
     try {
       String videoPath;
       if (_selectedSource == 'url') {
-        videoPath = await _videoProcessor.downloadVideo(_urlController.text);
+        videoPath = await _videoProcessor.downloadVideo(_urlController.text,
+            onProgress: (progress) {
+          setState(() {
+            _splitProgress = progress;
+          });
+        });
       } else {
         videoPath = _urlController.text;
       }
-      final outputDir = await _videoProcessor.splitVideo(videoPath, _parts);
+
+      final durationInMinutes = int.parse(_durationController.text);
+      final outputDir = await _videoProcessor.splitVideoByDuration(
+          videoPath, durationInMinutes);
       if (mounted) {
         setState(() {
           _splitFiles = Directory(outputDir)
               .listSync()
-              .map((e) => e.path)
-              .toList()
-            ..sort();
+              .map((item) => item.path)
+              .where((item) => item.endsWith('.mp4'))
+              .toList();
+          _isLoading = false;
+          _splitProgress = 1.0;
         });
-      }
-      if (_selectedSource == 'url') {
-        await _videoProcessor.deleteFile(videoPath);
-      }
-    } catch (e) {
-      if (mounted) {
+
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: ${e.toString()}')),
+          const SnackBar(content: Text('Video split successfully!')),
         );
       }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to split video: $e')),
+      );
     }
   }
 
   Future<void> _playVideo(int index) async {
-    if (_currentPlayingIndex == index && _videoPlayerController != null) {
-      if (_videoPlayerController!.value.isPlaying) {
-        await _videoPlayerController!.pause();
-      } else {
-        await _videoPlayerController!.play();
-      }
-      setState(() {});
-      return;
+    if (_videoPlayerController != null) {
+      await _videoPlayerController!.pause();
     }
 
-    _videoPlayerController?.dispose();
-
+    _videoPlayerController =
+        VideoPlayerController.file(File(_splitFiles![index]));
+    await _videoPlayerController!.initialize();
     setState(() {
       _currentPlayingIndex = index;
     });
 
-    _videoPlayerController = VideoPlayerController.file(
-      File(_splitFiles![index]),
-    );
-
-    try {
-      await _videoPlayerController!.initialize();
-      await _videoPlayerController!.play();
-      setState(() {});
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error playing video: $e')),
-        );
-      }
-    }
+    await _videoPlayerController!.play();
   }
 
   Future<void> _downloadFile(String filePath) async {
-    setState(() => _isLoading = true);
+    // Replace this with actual file download logic
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Downloading $filePath...')),
+    );
 
-    try {
-      final directory = await getExternalStorageDirectory();
-      if (directory == null) {
-        throw Exception('Could not access storage directory');
-      }
-
-      final fileName =
-          'split_video_${DateTime.now().millisecondsSinceEpoch}.mp4';
-      final savePath = '${directory.path}/$fileName';
-
-      await File(filePath).copy(savePath);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Video saved to: $savePath')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving video: $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
+    // You can use a package like dio to download the file and save it locally.
   }
 
   void _showSocialUploadOptions(String videoPath) {
