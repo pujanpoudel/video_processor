@@ -302,14 +302,11 @@ class SplitVideoScreenState extends State<SplitVideoScreen> {
       );
       return;
     }
-
     if (!_formKey.currentState!.validate() && _selectedSource == 'url') return;
-
     setState(() {
       _isLoading = true;
       _splitProgress = 0.0;
     });
-
     try {
       String videoPath;
       if (_selectedSource == 'url') {
@@ -317,19 +314,16 @@ class SplitVideoScreenState extends State<SplitVideoScreen> {
       } else {
         videoPath = _urlController.text;
       }
-
       final outputDir = await _videoProcessor.splitVideo(videoPath, _parts);
-
       if (mounted) {
         setState(() {
           _splitFiles = Directory(outputDir)
               .listSync()
               .map((e) => e.path)
               .toList()
-            ..sort(); // Sort to ensure correct order
+            ..sort();
         });
       }
-
       if (_selectedSource == 'url') {
         await _videoProcessor.deleteFile(videoPath);
       }
@@ -387,8 +381,9 @@ class SplitVideoScreenState extends State<SplitVideoScreen> {
 
     try {
       final directory = await getExternalStorageDirectory();
-      if (directory == null)
+      if (directory == null) {
         throw Exception('Could not access storage directory');
+      }
 
       final fileName =
           'split_video_${DateTime.now().millisecondsSinceEpoch}.mp4';
@@ -441,7 +436,7 @@ class SplitVideoScreenState extends State<SplitVideoScreen> {
   }
 
   Future<void> _uploadToSocialMedia(String platform, String videoPath) async {
-    Navigator.of(context).pop(); // Close the dialog
+    Navigator.of(context).pop();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$platform upload not implemented yet')),
     );
